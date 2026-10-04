@@ -265,8 +265,8 @@ class Shape {
   // Returns the primitive type of the array or buffer shape.
   // Precondition: this is an array shape or a buffer shape.
   PrimitiveType element_type() const {
-    if (const auto* const state = if_buffer_state()) {
-      return state->buffer_shape->element_type();
+    if (ABSL_PREDICT_FALSE(IsBuffer())) {
+      return if_buffer_state()->buffer_shape->element_type_;
     }
     return element_type_;
   }
@@ -384,11 +384,13 @@ class Shape {
   // Returns true if the shape is an array storage and has a layout. Both
   // if_array_state and if_buffer_state correspond to an array storage.
   bool has_layout() const {
-    if (!if_array_state() && !if_buffer_state()) {
-      return false;
+    if (const ArrayState* state = if_array_state(); ABSL_PREDICT_TRUE(state)) {
+      return state->layout.has_value();
     }
-    const ArrayState& state = array_state_maybe_underneath_buffer();
-    return state.layout.has_value();
+    if (const BufferState* state = if_buffer_state()) {
+      return state->buffer_shape->if_array_state()->layout.has_value();
+    }
+    return false;
   }
 
   // Returns the layout of the shape.
