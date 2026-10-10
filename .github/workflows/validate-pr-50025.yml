@@ -1,0 +1,28 @@
+name: Validate PR 50025 ln-pow semantics
+
+on:
+  push:
+    branches:
+      - ci/validate-ln-pow-50025-20261011
+
+permissions:
+  contents: read
+
+jobs:
+  focused-bazel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bazelisk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -o "$HOME/.local/bin/bazel"
+          chmod +x "$HOME/.local/bin/bazel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Focused algebraic simplifier tests
+        run: |
+          bazel test //xla/hlo/transforms/simplifiers:algebraic_simplifier_test \
+            --test_filter='AlgebraicSimplifierTest.LnPow*' \
+            --test_output=errors \
+            --jobs=2
