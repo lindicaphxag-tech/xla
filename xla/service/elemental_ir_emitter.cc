@@ -2494,9 +2494,15 @@ llvm::Value* ElementalIrEmitter::EmitIntegerPow(llvm::Value* lhs,
                                                 bool is_signed) {
   // Exponentiation by squaring:
   // https://en.wikipedia.org/wiki/Exponentiation_by_squaring;
-  int bits = 6;  // Everything else would overflow for any exponent > 1, as 2^64
-                 // is the larget possible exponent for a 64-bit integer, and
-                 // that's 1 << 6.
+  // Multiplication wraps modulo 2^width, rather than overflowing to zero.
+  // For an odd base, the exponent of the unit group modulo 2^width divides
+  // 2^(width-2) (for width >= 3).  Therefore all exponent bits below
+  // width-2 are significant: stopping at six bits silently changed 3^64 to
+  // 1 for 32-bit integers.  For an even base, the existing post-loop guard
+  // sets the result to zero if any high exponent bit remains (then the
+  // exponent is >= width).  Keep the six-bit fast path for widths <= 8.
+  const int width = rhs->getType()->getIntegerBitWidth();
+  const int bits = width > 8 ? width - 2 : 6;
   llvm::Value* base = lhs;
   llvm::Value* exponent = rhs;
   llvm::Value* exp_one = llvm::ConstantInt::get(exponent->getType(), 1);
