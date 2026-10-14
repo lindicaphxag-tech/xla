@@ -1,0 +1,39 @@
+name: Targeted genuine OpenXLA Bazel C++ integer-power correctness
+on:
+  push:
+    branches: [fix/integer-power-full-exponent-upstream-base-20261014]
+    paths:
+      - xla/service/elemental_ir_emitter.cc
+      - xla/service/elemental_ir_emitter_test.cc
+      - xla/mlir_hlo/mhlo/transforms/map_mhlo_to_scalar_op.h
+      - .github/workflows/fork-xla-bazel-integer-pow.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  CPU-compiled-XLA-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      BAZELISK_HOME: /tmp/bazelisk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.15.0
+        with:
+          bazelisk-cache: true
+          disk-cache: false
+          repository-cache: false
+      - name: Confirm official generated test target (do not assume label)
+        run: |
+          bazel query 'kind(".*test", //xla/service:all)' | grep elemental_ir_emitter_test | tee /tmp/matching_targets.txt
+      - name: Run actual amended LLVM CPU code and HLO differential C++ tests
+        run: |
+          set -o pipefail
+          cpu_target=$(grep -E '^//xla/service:elemental_ir_emitter_test_cpu$' /tmp/matching_targets.txt | head -1)
+          if [ -z "$cpu_target" ]; then
+            cpu_target=$(grep -E '^//xla/service:elemental_ir_emitter_test$' /tmp/matching_targets.txt | head -1)
+          fi
+          test -n "$cpu_target" || { echo 'Missing official CPU test target'; exit 1; }
+          bazel test "$cpu_target" --jobs=2 --local_ram_resources=4096 --test_output=errors \
+            --test_filter='ElementalIrEmitterExecutionTest.IntegerPowHighBits*' \
+            --verbose_failures
