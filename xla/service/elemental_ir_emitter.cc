@@ -2502,9 +2502,15 @@ llvm::Value* ElementalIrEmitter::EmitIntegerPow(llvm::Value* lhs,
                                                 bool is_signed) {
   // Exponentiation by squaring:
   // https://en.wikipedia.org/wiki/Exponentiation_by_squaring;
-  int bits = 6;  // Everything else would overflow for any exponent > 1, as 2^64
-                 // is the larget possible exponent for a 64-bit integer, and
-                 // that's 1 << 6.
+  // Integer multiplication wraps modulo 2^bit_width.  In particular, an
+  // odd base remains invertible modulo 2^bit_width: its high exponent bits
+  // are significant even when the exponent exceeds 63.  The old six-bit
+  // bound silently computed base^(exponent & 63) for odd bases, and returned
+  // the wrong value for even bases with large exponents as well.
+  // Use the full exponent width to match the HLO interpreter for all signed
+  // and unsigned integer types; the negative signed-exponent rule below is
+  // deliberately unchanged.
+  const int bits = exponent->getType()->getIntegerBitWidth();
   llvm::Value* base = lhs;
   llvm::Value* exponent = rhs;
   llvm::Value* exp_one = llvm::ConstantInt::get(exponent->getType(), 1);
