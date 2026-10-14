@@ -1191,10 +1191,14 @@ inline Value mapMhloOpToStdScalarOp<mhlo::PowOp>(
                                  lb.getIntegerAttr(elementType, 2));
   Value step = arith::ConstantIndexOp::create(lb, 1);
   Value lowerBound = arith::ConstantIndexOp::create(lb, 0);
-  // Everything else would overflow for any exponent > 1, as 2^64
-  // is the larget possible exponent for a 64-bit integer, and
-  // that's 1 << 6.
-  Value upperBound = arith::ConstantIndexOp::create(lb, 6);
+  // Modulo 2^width, odd bases retain exponent bits up to width-3:
+  // their multiplicative order divides 2^(width-2), not 2^6.  Stop after
+  // width-2 bits and retain the guard below for even bases and any
+  // remaining exponent bits.  For widths <= 8 the old six-bit path is
+  // already sufficient.
+  const int width = mlir::cast<IntegerType>(elementType).getWidth();
+  Value upperBound = arith::ConstantIndexOp::create(
+      lb, width > 8 ? width - 2 : 6);
   auto originalBase = adaptor.getLhs();
   auto originalExponent = adaptor.getRhs();
 
