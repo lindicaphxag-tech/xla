@@ -2510,7 +2510,7 @@ llvm::Value* ElementalIrEmitter::EmitIntegerPow(llvm::Value* lhs,
   // Use the full exponent width to match the HLO interpreter for all signed
   // and unsigned integer types; the negative signed-exponent rule below is
   // deliberately unchanged.
-  const int bits = exponent->getType()->getIntegerBitWidth();
+  const int bits = rhs->getType()->getIntegerBitWidth();
   llvm::Value* base = lhs;
   llvm::Value* exponent = rhs;
   llvm::Value* exp_one = llvm::ConstantInt::get(exponent->getType(), 1);
