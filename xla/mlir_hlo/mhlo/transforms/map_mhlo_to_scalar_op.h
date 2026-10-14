@@ -1137,10 +1137,13 @@ inline Value mapMhloOpToStdScalarOp<mhlo::PowOp>(
                                  lb.getIntegerAttr(elementType, 2));
   Value step = arith::ConstantIndexOp::create(lb, 1);
   Value lowerBound = arith::ConstantIndexOp::create(lb, 0);
-  // Everything else would overflow for any exponent > 1, as 2^64
-  // is the larget possible exponent for a 64-bit integer, and
-  // that's 1 << 6.
-  Value upperBound = arith::ConstantIndexOp::create(lb, 6);
+  // Multiplication wraps modulo 2^bit_width.  Odd bases retain information
+  // from high exponent bits (e.g. 3^64 modulo 2^32 is not 1), so limiting
+  // exponentiation by squaring to six iterations is mathematically incorrect.
+  // Match the legacy LLVM elemental lowering and reference interpreter by
+  // processing the entire typed integer exponent.
+  Value upperBound = arith::ConstantIndexOp::create(
+      lb, mlir::cast<IntegerType>(elementType).getWidth());
   auto originalBase = adaptor.getLhs();
   auto originalExponent = adaptor.getRhs();
 
