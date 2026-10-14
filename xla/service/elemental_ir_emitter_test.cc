@@ -688,5 +688,87 @@ ENTRY main {
   RunTest(hlo_text, {&base, &exponent});
 }
 
+TEST_F(ElementalIrEmitterExecutionTest, IntegerPowHighBitsOddAndEvenU32) {
+  // The former six-iteration lowering computed x^(exp & 63), and therefore
+  // returned 1 instead of 3^64 mod 2^32 and 1 instead of 2^64 mod 2^32.
+  // The HLO evaluator uses exact fixed-width modular exponentiation.
+  const std::string hlo_text = R"(
+HloModule IntegerPowHighBitsOddAndEvenU32
+ENTRY main {
+  base = u32[10]{0} parameter(0)
+  exponent = u32[10]{0} parameter(1)
+  ROOT power = u32[10]{0} power(base, exponent)
+}
+)";
+  Literal base = LiteralUtil::CreateR1<uint32_t>(
+      {3, 2, 3, 1, 0, 5, 7, 2, 3, 3});
+  Literal exponent = LiteralUtil::CreateR1<uint32_t>(
+      {64, 64, 65, 100, 0, 127, 128, 32, 63, 1u << 31});
+  RunTest(hlo_text, {&base, &exponent});
+}
+
+TEST_F(ElementalIrEmitterExecutionTest, IntegerPowHighBitsSignedS32) {
+  const std::string hlo_text = R"(
+HloModule IntegerPowHighBitsSignedS32
+ENTRY main {
+  base = s32[10]{0} parameter(0)
+  exponent = s32[10]{0} parameter(1)
+  ROOT power = s32[10]{0} power(base, exponent)
+}
+)";
+  Literal base = LiteralUtil::CreateR1<int32_t>(
+      {3, -3, -1, -1, -2, 2, 0, 1, -1, 5});
+  Literal exponent = LiteralUtil::CreateR1<int32_t>(
+      {64, 65, 64, 65, 100, 64, 0, -2147483647, -101, 127});
+  RunTest(hlo_text, {&base, &exponent});
+}
+
+TEST_F(ElementalIrEmitterExecutionTest, IntegerPowHighBitsU64) {
+  const std::string hlo_text = R"(
+HloModule IntegerPowHighBitsU64
+ENTRY main {
+  base = u64[9]{0} parameter(0)
+  exponent = u64[9]{0} parameter(1)
+  ROOT power = u64[9]{0} power(base, exponent)
+}
+)";
+  Literal base = LiteralUtil::CreateR1<uint64_t>(
+      {3, 3, 5, 7, 2, 0, 1, 3, 5});
+  Literal exponent = LiteralUtil::CreateR1<uint64_t>(
+      {64, 65, 128, 1ull << 63, 64, 0, 123, 1ull << 63,
+       (1ull << 63) + 1});
+  RunTest(hlo_text, {&base, &exponent});
+}
+
+TEST_F(ElementalIrEmitterExecutionTest, IntegerPowHighBitsU8AndU16) {
+  const std::string u8_hlo = R"(
+HloModule IntegerPowHighBitsU8
+ENTRY main {
+  base = u8[8]{0} parameter(0)
+  exponent = u8[8]{0} parameter(1)
+  ROOT power = u8[8]{0} power(base, exponent)
+}
+)";
+  Literal base_u8 = LiteralUtil::CreateR1<uint8_t>(
+      {3, 2, 5, 7, 1, 0, 3, 3});
+  Literal exponent_u8 = LiteralUtil::CreateR1<uint8_t>(
+      {64, 64, 65, 128, 255, 0, 1, 127});
+  RunTest(u8_hlo, {&base_u8, &exponent_u8});
+
+  const std::string u16_hlo = R"(
+HloModule IntegerPowHighBitsU16
+ENTRY main {
+  base = u16[8]{0} parameter(0)
+  exponent = u16[8]{0} parameter(1)
+  ROOT power = u16[8]{0} power(base, exponent)
+}
+)";
+  Literal base_u16 = LiteralUtil::CreateR1<uint16_t>(
+      {3, 2, 5, 7, 1, 0, 3, 3});
+  Literal exponent_u16 = LiteralUtil::CreateR1<uint16_t>(
+      {64, 64, 65, 128, 255, 0, 1, 32767});
+  RunTest(u16_hlo, {&base_u16, &exponent_u16});
+}
+
 }  // namespace
 }  // namespace xla
