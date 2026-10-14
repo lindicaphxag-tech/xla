@@ -1197,8 +1197,8 @@ inline Value mapMhloOpToStdScalarOp<mhlo::PowOp>(
   // remaining exponent bits.  For widths <= 8 the old six-bit path is
   // already sufficient.
   const int width = mlir::cast<IntegerType>(elementType).getWidth();
-  Value upperBound = arith::ConstantIndexOp::create(
-      lb, width > 8 ? width - 2 : 6);
+  Value upperBound =
+      arith::ConstantIndexOp::create(lb, width > 8 ? width - 2 : 6);
   auto originalBase = adaptor.getLhs();
   auto originalExponent = adaptor.getRhs();
 
