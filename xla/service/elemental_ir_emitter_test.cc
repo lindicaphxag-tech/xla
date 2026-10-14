@@ -700,8 +700,8 @@ ENTRY main {
   ROOT power = u32[10]{0} power(base, exponent)
 }
 )";
-  Literal base = LiteralUtil::CreateR1<uint32_t>(
-      {3, 2, 3, 1, 0, 5, 7, 2, 3, 3});
+  Literal base =
+      LiteralUtil::CreateR1<uint32_t>({3, 2, 3, 1, 0, 5, 7, 2, 3, 3});
   Literal exponent = LiteralUtil::CreateR1<uint32_t>(
       {64, 64, 65, 100, 0, 127, 128, 32, 63, 1u << 31});
   RunTest(hlo_text, {&base, &exponent});
@@ -716,8 +716,8 @@ ENTRY main {
   ROOT power = s32[10]{0} power(base, exponent)
 }
 )";
-  Literal base = LiteralUtil::CreateR1<int32_t>(
-      {3, -3, -1, -1, -2, 2, 0, 1, -1, 5});
+  Literal base =
+      LiteralUtil::CreateR1<int32_t>({3, -3, -1, -1, -2, 2, 0, 1, -1, 5});
   Literal exponent = LiteralUtil::CreateR1<int32_t>(
       {64, 65, 64, 65, 100, 64, 0, -2147483647, -101, 127});
   RunTest(hlo_text, {&base, &exponent});
@@ -732,11 +732,9 @@ ENTRY main {
   ROOT power = u64[9]{0} power(base, exponent)
 }
 )";
-  Literal base = LiteralUtil::CreateR1<uint64_t>(
-      {3, 3, 5, 7, 2, 0, 1, 3, 5});
+  Literal base = LiteralUtil::CreateR1<uint64_t>({3, 3, 5, 7, 2, 0, 1, 3, 5});
   Literal exponent = LiteralUtil::CreateR1<uint64_t>(
-      {64, 65, 128, 1ull << 63, 64, 0, 123, 1ull << 63,
-       (1ull << 63) + 1});
+      {64, 65, 128, 1ull << 63, 64, 0, 123, 1ull << 63, (1ull << 63) + 1});
   RunTest(hlo_text, {&base, &exponent});
 }
 
@@ -749,10 +747,9 @@ ENTRY main {
   ROOT power = u8[8]{0} power(base, exponent)
 }
 )";
-  Literal base_u8 = LiteralUtil::CreateR1<uint8_t>(
-      {3, 2, 5, 7, 1, 0, 3, 3});
-  Literal exponent_u8 = LiteralUtil::CreateR1<uint8_t>(
-      {64, 64, 65, 128, 255, 0, 1, 127});
+  Literal base_u8 = LiteralUtil::CreateR1<uint8_t>({3, 2, 5, 7, 1, 0, 3, 3});
+  Literal exponent_u8 =
+      LiteralUtil::CreateR1<uint8_t>({64, 64, 65, 128, 255, 0, 1, 127});
   RunTest(u8_hlo, {&base_u8, &exponent_u8});
 
   const std::string u16_hlo = R"(
@@ -763,10 +760,9 @@ ENTRY main {
   ROOT power = u16[8]{0} power(base, exponent)
 }
 )";
-  Literal base_u16 = LiteralUtil::CreateR1<uint16_t>(
-      {3, 2, 5, 7, 1, 0, 3, 3});
-  Literal exponent_u16 = LiteralUtil::CreateR1<uint16_t>(
-      {64, 64, 65, 128, 255, 0, 1, 32767});
+  Literal base_u16 = LiteralUtil::CreateR1<uint16_t>({3, 2, 5, 7, 1, 0, 3, 3});
+  Literal exponent_u16 =
+      LiteralUtil::CreateR1<uint16_t>({64, 64, 65, 128, 255, 0, 1, 32767});
   RunTest(u16_hlo, {&base_u16, &exponent_u16});
 }
 
