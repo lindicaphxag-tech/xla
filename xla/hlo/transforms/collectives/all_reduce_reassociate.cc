@@ -276,6 +276,20 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
         }
       }
 
+      // LookThroughForAllReduce may pass through a Convert behind a Reshape,
+      // Pad or Slice, while the optional-convert matcher above only handles
+      // direct all-reduce users. Without an explicit promotion, cloning the
+      // original reduction computation for inst's element type would leave the
+      // new all-reduce with a mismatched reducer signature (e.g. f32/f64).
+      // In addition to being malformed HLO, downstream collective passes can
+      // silently mix those buffers. Preserve the original reduction instead.
+      if (!should_promote_ar &&
+          (ar0->shape().element_type() != inst->shape().element_type() ||
+           ar1->shape().element_type() != inst->shape().element_type())) {
+        VLOG(2) << "Skipping reassociation across hidden type conversion";
+        continue;
+      }
+
       HloInstruction* op_operand0 = inst->mutable_operand(0);
       HloInstruction* op_operand1 = inst->mutable_operand(1);
       if (convert0) {
