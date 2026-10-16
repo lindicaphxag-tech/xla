@@ -167,6 +167,22 @@ TEST_F(ConvertTest, ConvertR1PREDToR1S32) {
   ComputeAndCompareR1<int32_t>(&builder, expected, {});
 }
 
+TEST_F(ConvertTest, ConvertR1PREDWithNonCanonicalStorageToR1S32) {
+  XlaBuilder builder(TestName());
+
+  auto arg_literal = LiteralUtil::CreateR1<bool>({false, true, true});
+  auto* raw_data = static_cast<uint8_t*>(arg_literal.untyped_data());
+  raw_data[0] = 0x00;
+  raw_data[1] = 0x01;
+  raw_data[2] = 0xff;
+
+  auto arg_param = Parameter(&builder, 0, arg_literal.shape(), "arg_param");
+  ConvertElementType(arg_param, S32);
+
+  std::vector<int32_t> expected = {0, 1, 1};
+  ComputeAndCompareR1<int32_t>(&builder, expected, {&arg_literal});
+}
+
 TEST_F(ConvertTest, ConvertR1PREDToR1U32) {
   XlaBuilder builder(TestName());
   auto a = ConstantR1<bool>(&builder, {true, false, true});
