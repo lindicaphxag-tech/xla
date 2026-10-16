@@ -672,6 +672,17 @@ absl::StatusOr<llvm::Value*> ElementalIrEmitter::EmitIntegerUnaryOp(
             llvm_ir::PrimitiveTypeToIrType(PRED, module_->getContext()));
       }
       if (primitive_util::IsIntegralType(to_type)) {
+        if (from_type == PRED) {
+          // PRED has an 8-bit storage representation in XLA, but its semantic
+          // value is only false or true. Convert through i1 so non-canonical
+          // predicate storage (e.g. 0xff for true) is normalized to 0 or 1.
+          llvm::Value* pred = ICmpNE(
+              operand_value,
+              llvm::ConstantInt::get(operand_value->getType(), 0));
+          return b_->CreateZExt(
+              pred,
+              llvm_ir::PrimitiveTypeToIrType(to_type, module_->getContext()));
+        }
         return IntCast(
             operand_value,
             llvm_ir::PrimitiveTypeToIrType(to_type, module_->getContext()),
