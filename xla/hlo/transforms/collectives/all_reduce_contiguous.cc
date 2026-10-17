@@ -117,6 +117,23 @@ absl::StatusOr<bool> AllReduceContiguous::RunImpl(
     for (HloInstruction* instruction : computation->instructions()) {
       if (instruction->opcode() == HloOpcode::kAllReduce &&
           instruction->operand_count() > 1) {
+        // A tuple all-reduce can have different element types. Contiguously
+        // packing it with bitcasts to operand(0)'s type is only legal when
+        // every operand has the same element type; otherwise a mixed-precision
+        // collective is silently reinterpreted as the wrong dtype.
+        PrimitiveType type = instruction->operand(0)->shape().element_type();
+        bool same_type = true;
+        for (const HloInstruction* operand : instruction->operands()) {
+          if (!operand->shape().IsArray() ||
+              operand->shape().element_type() != type) {
+            same_type = false;
+            break;
+          }
+        }
+        if (!same_type) {
+          VLOG(2) << "Skipping mixed-element-type tuple all-reduce";
+          continue;
+        }
         all_reduces.push_back(Cast<HloAllReduceInstruction>(instruction));
       }
     }

@@ -121,6 +121,22 @@ HloInstruction* LookThroughForAllReduce(HloInstruction* instr,
   return instr;
 }
 
+// Returns true if an operand's path to its all-reduce crosses a convert.
+// AllReduceReassociate may only move an explicit, directly matched,
+// value-preserving convert to the collective input. A hidden convert must not
+// be moved across the collective even when later converts restore the original
+// element type: rounding has already occurred along that path.
+bool HasHiddenConvert(const HloInstruction* operand,
+                      const HloInstruction* all_reduce) {
+  for (const HloInstruction* instr = operand; instr != all_reduce;
+       instr = instr->operand(0)) {
+    if (instr->opcode() == HloOpcode::kConvert) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Because we can look through pads its possible that reassociating the
 // all-reduce makes us reduce over more than the sum of the two unpadded
 // individual all-reduces. Check that's not the case.
@@ -256,9 +272,14 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
 
       HloInstruction* convert0 = nullptr;
       HloInstruction* convert1 = nullptr;
+      // A partial pattern match may assign convert0 before operand 1 fails.
+      // Trust the matched converts only if the whole two-operand pattern
+      // succeeded; otherwise any convert is an unmatched path operation.
       if (!MatchOperandsToAllReduceWithOptionalConvert(inst, &convert0,
                                                        &convert1)) {
-        VLOG(2) << "One or both inputs are type-converted.";
+        convert0 = nullptr;
+        convert1 = nullptr;
+        VLOG(2) << "All-reduce operands do not match direct converts.";
       }
       // Check to see if input converts are present and preserving values and
       // precision.
@@ -276,6 +297,20 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
         }
       }
 
+      // LookThroughForAllReduce may pass through a Convert behind a Reshape,
+      // Pad or Slice, while the optional-convert matcher above only handles
+      // direct all-reduce users. Without an explicit promotion, cloning the
+      // original reduction computation for inst's element type would leave the
+      // new all-reduce with a mismatched reducer signature (e.g. f32/f64).
+      // In addition to being malformed HLO, downstream collective passes can
+      // silently mix those buffers. Preserve the original reduction instead.
+      if (!should_promote_ar &&
+          (ar0->shape().element_type() != inst->shape().element_type() ||
+           ar1->shape().element_type() != inst->shape().element_type())) {
+        VLOG(2) << "Skipping reassociation across hidden type conversion";
+        continue;
+      }
+
       HloInstruction* op_operand0 = inst->mutable_operand(0);
       HloInstruction* op_operand1 = inst->mutable_operand(1);
       if (convert0) {
@@ -283,6 +318,14 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
       }
       if (convert1) {
         op_operand1 = convert1->mutable_operand(0);
+      }
+      // End-point type equality is not sufficient: f64 -> f32 -> f64
+      // preserves the element type but not the values. Reject any conversion
+      // hidden behind formatting operations on either operand path.
+      if (HasHiddenConvert(op_operand0, ar0) ||
+          HasHiddenConvert(op_operand1, ar1)) {
+        VLOG(2) << "Skipping reassociation across unmatched conversion";
+        continue;
       }
       if (!AreCompatible(ar0, ar1, *kind,
                          /*ignore_element_type=*/should_promote_ar)) {
