@@ -641,21 +641,14 @@ ENTRY main {
   SCOPED_TRACE(module->ToString());
 }
 
-// A narrowing convert hidden behind reshape is traversed by
-// LookThroughForAllReduce but is not recognized by the direct optional-convert
-// matcher. Reassociation must not clone an f64 reducer onto an f32 all-reduce.
-// A direct, value-preserving convert on one operand must not authorize
-// reassociation across a hidden narrowing convert on the other operand.
+// A complete direct-convert match is required to promote either operand.
+// The first operand is a safe direct bf16 -> f32 widening, while the second
+// crosses the same conversion behind a reshape. A partial matcher success
+// must not authorize reassociating the second operand.
 TEST_F(AllReduceSimplifierTest,
        DirectConvertMustNotAuthorizeHiddenTypeMismatch) {
   constexpr absl::string_view kHloModule = R"(
 HloModule m
-
-sum64 {
-  x = f64[] parameter(0)
-  y = f64[] parameter(1)
-  ROOT add = f64[] add(x, y)
-}
 
 sum16 {
   x = bf16[] parameter(0)
@@ -664,21 +657,19 @@ sum16 {
 }
 
 ENTRY main {
-  p0 = f64[2,2] parameter(0)
+  p0 = bf16[2,2] parameter(0)
   p1 = bf16[2,2] parameter(1)
-  ar0 = f64[2,2] all-reduce(p0), replica_groups={}, to_apply=sum64
+  ar0 = bf16[2,2] all-reduce(p0), replica_groups={}, to_apply=sum16
   ar1 = bf16[2,2] all-reduce(p1), replica_groups={}, to_apply=sum16
   c0 = f32[2,2] convert(ar0)
-  r0 = f32[2,2] reshape(c0)
   c1 = f32[2,2] convert(ar1)
-  ROOT add = f32[2,2] add(r0, c1)
+  r1 = f32[2,2] reshape(c1)
+  ROOT add = f32[2,2] add(c0, r1)
 }
 )";
   ASSERT_OK_AND_ASSIGN(auto module,
                        RunPass(kHloModule, /*expect_change=*/false));
   EXPECT_EQ(AllReduceCount(module), 2);
-  EXPECT_EQ(module->entry_computation()->root_instruction()->opcode(),
-            HloOpcode::kAdd);
 }
 
 TEST_F(AllReduceSimplifierTest,
@@ -701,6 +692,43 @@ ENTRY main {
   c1 = f32[2,2] convert(ar1)
   r0 = f32[4] reshape(c0)
   r1 = f32[4] reshape(c1)
+  ROOT add = f32[4] add(r0, r1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       RunPass(kHloModule, /*expect_change=*/false));
+  EXPECT_EQ(AllReduceCount(module), 2);
+  EXPECT_EQ(module->entry_computation()->root_instruction()->opcode(),
+            HloOpcode::kAdd);
+}
+
+// Dtype equality is not semantic equality. Rounding through bf16 and
+// converting back to f32 retains the endpoint dtype but not the values.
+// On two replicas, round_bf16(1 + 2^-8) = 1 while
+// round_bf16(1) + round_bf16(2^-8) = 1 + 2^-8.
+// The corresponding collectives must not move across such a path.
+TEST_F(AllReduceSimplifierTest,
+       HiddenRoundTripMustNotBeTreatedAsTypePreserving) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum32 {
+  x = f32[] parameter(0)
+  y = f32[] parameter(1)
+  ROOT add = f32[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f32[2,2] parameter(0)
+  p1 = f32[2,2] parameter(1)
+  ar0 = f32[2,2] all-reduce(p0), replica_groups={}, to_apply=sum32
+  ar1 = f32[2,2] all-reduce(p1), replica_groups={}, to_apply=sum32
+  n0 = bf16[2,2] convert(ar0)
+  n1 = bf16[2,2] convert(ar1)
+  w0 = f32[2,2] convert(n0)
+  w1 = f32[2,2] convert(n1)
+  r0 = f32[4] reshape(w0)
+  r1 = f32[4] reshape(w1)
   ROOT add = f32[4] add(r0, r1)
 }
 )";
