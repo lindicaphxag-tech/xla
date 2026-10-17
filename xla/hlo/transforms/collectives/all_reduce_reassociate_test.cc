@@ -641,6 +641,104 @@ ENTRY main {
   SCOPED_TRACE(module->ToString());
 }
 
+// A narrowing convert hidden behind reshape is traversed by
+// LookThroughForAllReduce but is not recognized by the direct optional-convert
+// matcher. Reassociation must not clone an f64 reducer onto an f32 all-reduce.
+// A direct, value-preserving convert on one operand must not authorize
+// reassociation across a hidden narrowing convert on the other operand.
+TEST_F(AllReduceSimplifierTest,
+       DirectConvertMustNotAuthorizeHiddenTypeMismatch) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum64 {
+  x = f64[] parameter(0)
+  y = f64[] parameter(1)
+  ROOT add = f64[] add(x, y)
+}
+
+sum16 {
+  x = bf16[] parameter(0)
+  y = bf16[] parameter(1)
+  ROOT add = bf16[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f64[2,2] parameter(0)
+  p1 = bf16[2,2] parameter(1)
+  ar0 = f64[2,2] all-reduce(p0), replica_groups={}, to_apply=sum64
+  ar1 = bf16[2,2] all-reduce(p1), replica_groups={}, to_apply=sum16
+  c0 = f32[2,2] convert(ar0)
+  r0 = f32[2,2] reshape(c0)
+  c1 = f32[2,2] convert(ar1)
+  ROOT add = f32[2,2] add(r0, c1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       RunPass(kHloModule, /*expect_change=*/false));
+  EXPECT_EQ(AllReduceCount(module), 2);
+  EXPECT_EQ(module->entry_computation()->root_instruction()->opcode(),
+            HloOpcode::kAdd);
+}
+
+TEST_F(AllReduceSimplifierTest,
+       HiddenNarrowingConvertMustNotChangeReducerType) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum64 {
+  x = f64[] parameter(0)
+  y = f64[] parameter(1)
+  ROOT add = f64[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f64[2,2] parameter(0)
+  p1 = f64[2,2] parameter(1)
+  ar0 = f64[2,2] all-reduce(p0), replica_groups={}, to_apply=sum64
+  ar1 = f64[2,2] all-reduce(p1), replica_groups={}, to_apply=sum64
+  c0 = f32[2,2] convert(ar0)
+  c1 = f32[2,2] convert(ar1)
+  r0 = f32[4] reshape(c0)
+  r1 = f32[4] reshape(c1)
+  ROOT add = f32[4] add(r0, r1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       RunPass(kHloModule, /*expect_change=*/false));
+  EXPECT_EQ(AllReduceCount(module), 2);
+  EXPECT_EQ(module->entry_computation()->root_instruction()->opcode(),
+            HloOpcode::kAdd);
+}
+
+// The type guard must not disable valid reassociation when the reshape
+// preserves the all-reduce element type.
+TEST_F(AllReduceSimplifierTest,
+       ElementTypePreservingReshapeStillReassociates) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum64 {
+  x = f64[] parameter(0)
+  y = f64[] parameter(1)
+  ROOT add = f64[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f64[2,2] parameter(0)
+  p1 = f64[2,2] parameter(1)
+  ar0 = f64[2,2] all-reduce(p0), replica_groups={}, to_apply=sum64
+  ar1 = f64[2,2] all-reduce(p1), replica_groups={}, to_apply=sum64
+  r0 = f64[4] reshape(ar0)
+  r1 = f64[4] reshape(ar1)
+  ROOT add = f64[4] add(r0, r1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       RunPass(kHloModule, /*expect_change=*/true));
+  EXPECT_EQ(AllReduceCount(module), 1);
+}
+
 TEST_F(AllReduceSimplifierTest, AllReduceDynamicSlicePattern) {
   absl::string_view hlo_string = R"(
 HloModule m

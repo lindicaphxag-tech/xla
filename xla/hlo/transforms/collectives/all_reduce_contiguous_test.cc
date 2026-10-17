@@ -83,5 +83,39 @@ ENTRY %comp {
       root->get_frontend_attribute(kCollectiveGroupKeyAttr).has_value());
 }
 
+// Packing a heterogeneous tuple into the first operand's element type
+// bitcasts values of other types and can silently corrupt collective results.
+TEST_F(AllReduceContiguousTest, MixedElementTypesRemainUnpacked) {
+  constexpr absl::string_view kHlo = R"(
+HloModule mixed_collectives
+
+sum_mixed {
+  lhs0 = f32[] parameter(0)
+  lhs1 = f64[] parameter(1)
+  rhs0 = f32[] parameter(2)
+  rhs1 = f64[] parameter(3)
+  sum0 = f32[] add(lhs0, rhs0)
+  sum1 = f64[] add(lhs1, rhs1)
+  ROOT result = (f32[], f64[]) tuple(sum0, sum1)
+}
+
+ENTRY main {
+  p0 = f32[8] parameter(0)
+  p1 = f64[8] parameter(1)
+  ROOT ar = (f32[8], f64[8]) all-reduce(p0, p1), to_apply=sum_mixed
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
+
+  AllReduceContiguous pass;
+  TF_ASSERT_OK_AND_ASSIGN(bool changed, pass.Run(module.get()));
+  EXPECT_FALSE(changed);
+
+  HloInstruction* root = module->entry_computation()->root_instruction();
+  EXPECT_EQ(root->opcode(), HloOpcode::kAllReduce);
+  EXPECT_EQ(root->operand_count(), 2);
+}
+
 }  // namespace
 }  // namespace xla

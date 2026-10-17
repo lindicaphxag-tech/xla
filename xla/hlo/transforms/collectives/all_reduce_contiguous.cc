@@ -117,6 +117,27 @@ absl::StatusOr<bool> AllReduceContiguous::RunImpl(
     for (HloInstruction* instruction : computation->instructions()) {
       if (instruction->opcode() == HloOpcode::kAllReduce &&
           instruction->operand_count() > 1) {
+        if (!instruction->operand(0)->shape().IsArray()) {
+          VLOG(2) << "Skipping all-reduce packing with non-array operands";
+          continue;
+        }
+        PrimitiveType element_type =
+            instruction->operand(0)->shape().element_type();
+        bool same_element_type = true;
+        for (const HloInstruction* operand : instruction->operands()) {
+          if (!operand->shape().IsArray() ||
+              operand->shape().element_type() != element_type) {
+            same_element_type = false;
+            break;
+          }
+        }
+        // ReplaceWithContiguousAllReduce bitcasts every operand into the
+        // first operand's element type. That is only valid for homogeneous
+        // tuples; heterogeneous tuple all-reduces must remain unpacked.
+        if (!same_element_type) {
+          VLOG(2) << "Skipping mixed-element-type tuple all-reduce";
+          continue;
+        }
         all_reduces.push_back(Cast<HloAllReduceInstruction>(instruction));
       }
     }

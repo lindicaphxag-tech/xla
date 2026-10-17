@@ -276,6 +276,26 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
         }
       }
 
+      // LookThroughForAllReduce can cross a type-changing Convert hidden
+      // behind a Reshape, Pad, or Slice, while the optional-convert matcher
+      // above only recognizes direct Convert operands. A direct conversion on
+      // one side must not authorize a hidden type mismatch on the other side.
+      // Only a direct Convert from the corresponding all-reduce can justify an
+      // element-type mismatch; its value-preservation was checked above.
+      const bool has_direct_convert0 =
+          convert0 != nullptr && convert0->opcode() == HloOpcode::kConvert &&
+          convert0->operand(0) == ar0;
+      const bool has_direct_convert1 =
+          convert1 != nullptr && convert1->opcode() == HloOpcode::kConvert &&
+          convert1->operand(0) == ar1;
+      if ((ar0->shape().element_type() != inst->shape().element_type() &&
+           !has_direct_convert0) ||
+          (ar1->shape().element_type() != inst->shape().element_type() &&
+           !has_direct_convert1)) {
+        VLOG(2) << "Skipping reassociation across hidden type conversion";
+        continue;
+      }
+
       HloInstruction* op_operand0 = inst->mutable_operand(0);
       HloInstruction* op_operand1 = inst->mutable_operand(1);
       if (convert0) {
