@@ -888,5 +888,68 @@ ENTRY main {
   EXPECT_EQ(AllReduceCount(module), 1);
 }
 
+// End-point dtype equality does not imply convert-free dataflow. Narrowing
+// an f64 collective result and widening it again changes its values; moving
+// the collective after those converts would perform the narrowing per replica
+// instead of after the reduction.
+TEST_F(AllReduceSimplifierTest, HiddenRoundTripConvertMustNotReassociate) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum64 {
+  x = f64[] parameter(0)
+  y = f64[] parameter(1)
+  ROOT add = f64[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f64[2,2] parameter(0)
+  p1 = f64[2,2] parameter(1)
+  ar0 = f64[2,2] all-reduce(p0), replica_groups={}, to_apply=sum64
+  ar1 = f64[2,2] all-reduce(p1), replica_groups={}, to_apply=sum64
+  down0 = f32[2,2] convert(ar0)
+  down1 = f32[2,2] convert(ar1)
+  up0 = f64[2,2] convert(down0)
+  up1 = f64[2,2] convert(down1)
+  r0 = f64[4] reshape(up0)
+  r1 = f64[4] reshape(up1)
+  ROOT add = f64[4] add(r0, r1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       RunPass(kHloModule, /*expect_change=*/false));
+  EXPECT_EQ(AllReduceCount(module), 2);
+}
+
+// A direct, value-preserving convert on one side must not turn an unrelated
+// hidden convert on the other side into an apparent direct promotion.
+TEST_F(AllReduceSimplifierTest, DirectAndHiddenConvertMustNotPromote) {
+  constexpr absl::string_view kHloModule = R"(
+HloModule m
+
+sum32 {
+  x = f32[] parameter(0)
+  y = f32[] parameter(1)
+  ROOT add = f32[] add(x, y)
+}
+
+ENTRY main {
+  p0 = f32[4] parameter(0)
+  p1 = f32[4] parameter(1)
+  ar0 = f32[4] all-reduce(p0), replica_groups={}, to_apply=sum32
+  ar1 = f32[4] all-reduce(p1), replica_groups={}, to_apply=sum32
+  direct = f64[4] convert(ar0)
+  hidden = f64[4] convert(ar1)
+  r1 = f64[4] reshape(hidden)
+  ROOT add = f64[4] add(direct, r1)
+}
+)";
+  ASSERT_OK_AND_ASSIGN(
+      auto module,
+      RunPass(kHloModule, /*expect_change=*/false,
+              /*reassociate_converted_ar=*/true));
+  EXPECT_EQ(AllReduceCount(module), 2);
+}
+
 }  // namespace
 }  // namespace xla
