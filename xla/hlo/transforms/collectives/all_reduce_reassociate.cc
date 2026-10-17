@@ -178,6 +178,27 @@ bool MatchOperandsToAllReduceWithOptionalConvert(HloInstruction* inst,
           });
   return Match(inst, ar_op_optional_convert_pattern);
 }
+
+// Endpoint dtype equality is not proof of semantic equivalence: a hidden
+// f32 -> bf16 -> f32 round trip loses precision without changing dtype.
+// Traverse the formatting path accepted by LookThroughForAllReduce and reject
+// any Convert not explicitly matched as a direct, value-preserving promotion.
+bool HasUnvalidatedConvertOnPath(const HloInstruction* operand,
+                                 const HloInstruction* all_reduce,
+                                 const HloInstruction* approved_convert) {
+  while (operand != all_reduce) {
+    if (operand->opcode() == HloOpcode::kConvert &&
+        operand != approved_convert) {
+      return true;
+    }
+    // Supported formatting ops and dynamic-slice use operand(0) as data.
+    if (operand->operand_count() == 0) {
+      return true;
+    }
+    operand = operand->operand(0);
+  }
+  return false;
+}
 }  // namespace
 
 absl::StatusOr<bool> AllReduceReassociate::RunImpl(
@@ -256,8 +277,13 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
 
       HloInstruction* convert0 = nullptr;
       HloInstruction* convert1 = nullptr;
-      if (!MatchOperandsToAllReduceWithOptionalConvert(inst, &convert0,
-                                                       &convert1)) {
+      const bool matched_direct_converts =
+          MatchOperandsToAllReduceWithOptionalConvert(inst, &convert0,
+                                                       &convert1);
+      if (!matched_direct_converts) {
+        // A failed composite match must not leave a partial promotion proof.
+        convert0 = nullptr;
+        convert1 = nullptr;
         VLOG(2) << "One or both inputs are type-converted.";
       }
       // Check to see if input converts are present and preserving values and
@@ -276,18 +302,18 @@ absl::StatusOr<bool> AllReduceReassociate::RunImpl(
         }
       }
 
-      // LookThroughForAllReduce can cross a type-changing Convert hidden
-      // behind a Reshape, Pad, or Slice, while the optional-convert matcher
-      // above only recognizes direct Convert operands. A direct conversion on
-      // one side must not authorize a hidden type mismatch on the other side.
-      // Only a direct Convert from the corresponding all-reduce can justify an
-      // element-type mismatch; its value-preservation was checked above.
+      // The path, not just its endpoint dtype, must be conversion-safe.
+      // A direct Convert on one side cannot authorize hidden conversion on
+      // the other, even when a later Convert restores the original dtype.
+      if (HasUnvalidatedConvertOnPath(inst->operand(0), ar0, convert0) ||
+          HasUnvalidatedConvertOnPath(inst->operand(1), ar1, convert1)) {
+        VLOG(2) << "Skipping reassociation across unvalidated conversion";
+        continue;
+      }
       const bool has_direct_convert0 =
-          convert0 != nullptr && convert0->opcode() == HloOpcode::kConvert &&
-          convert0->operand(0) == ar0;
+          convert0 != nullptr && convert0->operand(0) == ar0;
       const bool has_direct_convert1 =
-          convert1 != nullptr && convert1->opcode() == HloOpcode::kConvert &&
-          convert1->operand(0) == ar1;
+          convert1 != nullptr && convert1->operand(0) == ar1;
       if ((ar0->shape().element_type() != inst->shape().element_type() &&
            !has_direct_convert0) ||
           (ar1->shape().element_type() != inst->shape().element_type() &&
